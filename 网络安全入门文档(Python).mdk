@@ -1,0 +1,339 @@
+### 网络安全入门文档（Python）
+#### 1、ESP/TVM平台目录结构：
+```
+/
+|___ opt
+|   |___ nsfocus
+|       |___ espc(平台根目录)
+|           |___ conf(平台各种配置文件)
+|           |___ deps(平台环境目录)
+|           |___ ftp(ftp服务器跟目录)
+|           |___ log(平台各种日志路径)
+|           |___ majordomo(平台的一个Django项目文件夹)
+|           |___ vulnerabilityApp(内含Flask、Tornado等框架搭建的一些服务)
+```
+#### 2、/opt/nsfocus/espc/majordomo项目结构
+```
+majordomo
+|___ app(Django的App所在文件夹)
+|___ bin(常用的一些可执行文件所在文件夹)
+|___ conf(majordomo的配置文件所在文件夹)
+|___ cron(对Linux平台的crontab进行配置的执行入口文件所在文件夹)
+|___ majordomo
+|   |___ settings.py(Django项目通用配置文件)
+|   |___ urls.py(Django项目路由表：按照各个App划分路由段)
+|   |___ wsgi.py(项目通过wsgi部署时的入口文件)
+|___ utils(majordomo项目常用的工具包)
+```
+#### 3、/opt/nsfocus/espc/vulnerabilityApp目录结构
+```
+vulnerabilityApp
+|___ conf(脆弱性相关功能的配置文件所在文件夹)
+|___ tvm_celery.py(Celery异步任务工具模块)
+|___ tvm_report(脆弱性报表模块所在文件夹)
+|___ utils(vulnerabilityApp常用的工具包)
+```
+#### 4、/opt/nsfocus/espc/conf目录结构
+```
+conf
+|___ nginx
+|   |___ services-available(各服务占用的路由段配置文件所在文件夹)
+|   |___ services-enabled(内含services-available中各配置文件的软链接)
+|   |___ sites-available(个别特殊的需要绕过登录的接口路由段配置文件所在文件夹)
+|   |___ sites-enabled(内含sites-available中各配置文件的软链接)
+|___ service
+|   |___ jdbc.properties(平台的通用配置文件之一)
+|___ supervisor
+|   |___ supervisord.conf(supervisor的配置文件)
+|___ supervisord(各服务的supervisor配置文件所在文件夹)
+|___ uwsgi(各服务的uwsgi配置文件所在文件夹)
+注：
+1、绝大部分Python服务都是依靠uwsgi+supervisor来管理的，uwsgi负责服务的进程守护，supervisor对各个uwsgi服务(或通过其他方式部署的服务)进行管理，统一启动/终止/重启
+2、nginx的配置文件include的是各*-enabled文件夹，所以nginx的配置文件必须软链接到*-enabled文件夹下，否则不会生效
+3、/opt/nsfocus/espc/conf/service/jdbc.properties这个文件中包含数据库端口/用户名/密码、redis端口/用户名/密码、平台IP等配置信息，较为常用
+```
+#### 5、在majordomo下创建一个Django App
+##### Step1、创建App目录
+```
+ majordomo
+|___ app
+|   |___ huangyu_testt
+|       |___ __init__.py
+|       |___ urls.py
+|       |___ views.py
+```
+##### Step2、编写视图函数views.py
+```Python
+#! /usr/bin/env python
+# -*- coding:utf-8 -*-
+from django.http import JsonResponse
+from majordomo.decorators import permit_rest_method
+
+
+# Create your views here.
+@permit_rest_method('GET')
+def welcome(request):
+    ret = dict(errCode=0, errMsg=request.GET)
+    return JsonResponse(ret)
+```
+##### Step3、为视图函数配置路由
+```Python
+#! /usr/bin/env python
+# -*- coding:utf-8 -*-
+from django.conf.urls import url, patterns
+
+
+urlpatterns = patterns(
+    'app.huangyu_test.views',
+    url(r'^welcome/$', 'welcome')
+)
+```
+##### Step4、将新的App加到majordomo中(majordomo/majordomo/settings.py)
+```Python
+#! /usr/bin/env python
+# -*- coding:utf-8 -*-
+# 在settings.py文件中查找INSTALLED_APPS，在元组中添加‘app.huangyu_test’
+INSTALLED_APPS = (
+    'django.contrib.contenttypes',
+    'django.contrib.sessions',
+    'django.contrib.messages',
+    'django.contrib.staticfiles',
+    'djcelery',
+    'app.storage',
+    'app.msgCenter',
+    'app.geoIpMgr',
+    'app.geoCityMgr',
+    'app.nodeMgr',
+    'app.reportTmplMgr',
+    'app.systemMgr',
+    'app.esNodeMgr',
+    'app.redisMgr',
+    'app.situationMgr',
+    # new app
+    'app.huangyu_test',
+)
+```
+##### Step5、为新的App分配路由段(majordomo/majordomo/urls.py)
+```Python
+#! /usr/bin/env python
+# -*- coding:utf-8 -*-
+from django.conf.urls import include, url, patterns
+
+
+urlpatterns = [
+    url(r'^storage/', include('app.storage.urls')),
+    url(r'^msgCenter/', include('app.msgCenter.urls')),
+    url(r'^nodeMgr/', include('app.nodeMgr.urls')),
+    url(r'^geoIpMgr/', include('app.geoIpMgr.urls')),
+    url(r'^geoCityMgr/', include('app.geoCityMgr.urls')),
+    url(r'^cu/api/v1/', include('app.device.urls')),
+    url(r'^api/v1/', include('app.cu_proxy.urls')),
+    url(r'^reportTmplMgr/', include('app.reportTmplMgr.urls')),
+    url(r'^systemMgr/', include('app.systemMgr.urls')),
+    url(r'^esNodeMgr/', include('app.esNodeMgr.urls')),
+    url(r'^redisMgr/', include('app.redisMgr.urls')),
+    url(r'^api/v1/situationMgr/', include('app.situationMgr.urls')),
+    # new url
+    url(r'^huangyuTest/', include('app.huangyu_test.urls')),
+]
+```
+##### Step6、将新的App分配的路由段配置到nginx中(/opt/nsfocus/espc/conf/nginx/services-available/huangyuTest.conf)
+```
+location ^~ /huangyuTest {
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    uwsgi_read_timeout 1800;
+    uwsgi_send_timeout 600;
+    include uwsgi_params;
+    uwsgi_pass 127.0.0.1:8101;
+}
+```
+##### Step7、为新的nginx配置文件建立软链接
+```
+ln -s /opt/nsfocus/espc/conf/nginx/services-available/huangyuTest.conf /opt/nsfocus/espc/conf/nginx/services-enabled/huangyuTest.conf
+```
+##### Step8、重启nginx
+```
+/etc/init.d/nginx restart
+```
+##### Step9、重启majordomo服务
+###### 方法一：控制台命令重启
+```
+/opt/nsfocus/espc/deps/env/bin/supervisorctl -c /opt/nsfocus/espc/conf/supervisor/supervisord.conf -u espc -p what restart majordomo
+```
+###### 方法二：supervisor的WEB界面重启
+访问http://服务器ip:8103 eg:http://10.65.128.135:8103
+在弹出的窗口中填入用户名密码，espc:what
+![登录supervisor](https://raw.githubusercontent.com/Secretyu/webSafe_doc_pictures/master/%E7%99%BB%E5%BD%95supervisor.png)
+重启majordomo
+![重启majordomo](https://github.com/Secretyu/webSafe_doc_pictures/raw/master/重启majordomo.png)
+##### Step10、在接口测试工具中测试接口
+先登录平台https://服务器ip eg: https://10.65.128.135
+账户名密码需要视服务器而定，刚开始不知道可以问项目负责人
+![登录平台](https://github.com/Secretyu/webSafe_doc_pictures/raw/master/登录平台.png)
+访问https://服务器ip/pisces/test eg: https://10.65.128.135/pisces/test
+![接口测试工具](https://github.com/Secretyu/webSafe_doc_pictures/raw/master/接口测试工具.png)
+填写需要测试的url，选择请求方法，填写条件参数(header: json)和请求消息体(body: json)然后点击发送请求，查看响应数据
+![接口测试](https://github.com/Secretyu/webSafe_doc_pictures/raw/master/接口测试.png)
+##### Tips
+1. 重启majordomo服务时，记得跟踪majordomo的服务日志
+
+```bash
+tailf /opt/nsfocus/espc/log/supervisor/majordomo.err
+```
+```
+SIGINT/SIGQUIT received...killing workers...
+worker 1 buried after 1 seconds
+worker 2 buried after 1 seconds
+worker 3 buried after 1 seconds
+worker 4 buried after 1 seconds
+worker 5 buried after 1 seconds
+goodbye to uWSGI.
+[uWSGI] getting INI configuration from /opt/nsfocus/espc/conf/uwsgi/majordomo.ini
+*** Starting uWSGI 2.0.11.2 (64bit) on [Wed Apr 24 15:19:43 2019] ***
+compiled with version: 4.4.7 20120313 (Red Hat 4.4.7-16) on 03 November 2015 08:29:35
+os: Linux-2.6.32-754.12.1.el6.x86_64 #1 SMP Tue Apr 9 14:52:26 UTC 2019
+nodename: tvm-test
+machine: x86_64
+clock source: unix
+pcre jit disabled
+detected number of CPU cores: 40
+current working directory: /opt/nsfocus/espc/bin
+writing pidfile to /opt/nsfocus/espc/run/majordomo.pid
+detected binary path: /opt/nsfocus/espc/deps/env/bin/uwsgi
+setuid() to 569
+chdir() to /opt/nsfocus/espc/majordomo
+your processes number limit is 2048
+your memory page size is 4096 bytes
+ *** WARNING: you have enabled harakiri without post buffering. Slow upload could be rejected on post-unbuffered webservers ***
+detected max file descriptor number: 65536
+VirtualHosting mode enabled.
+lock engine: pthread robust mutexes
+thunder lock: enabled
+uwsgi socket 0 bound to TCP address 0.0.0.0:8101 fd 3
+Python version: 2.7.5 (default, Oct 29 2015, 11:30:55)  [GCC 4.4.7 20120313 (Red Hat 4.4.7-16)]
+Python main interpreter initialized at 0x7b67b0
+python threads support enabled
+your server socket listen backlog is limited to 100 connections
+your mercy for graceful operations on workers is 60 seconds
+mapped 430032 bytes (419 KB) for 5 cores
+*** Operational MODE: preforking ***
+WSGI app 0 (mountpoint='') ready in 1 seconds on interpreter 0x7b67b0 pid: 26240 (default app)
+*** uWSGI is running in multiple interpreter mode ***
+spawned uWSGI master process (pid: 26240)
+spawned uWSGI worker 1 (pid: 26262, cores: 1)
+spawned uWSGI worker 2 (pid: 26263, cores: 1)
+spawned uWSGI worker 3 (pid: 26264, cores: 1)
+spawned uWSGI worker 4 (pid: 26265, cores: 1)
+spawned uWSGI worker 5 (pid: 26266, cores: 1)
+```
+2. 代码中添加日志用已经编写好的统一打印日志的模块：Md_Debug
+
+```Python
+#! /usr/bin/env python
+# -*- coding:utf-8 -*-
+from django.http import JsonResponse
+from majordomo.decorators import permit_rest_method
+from utils.logger import Md_Debug
+
+
+# Create your views here.
+@permit_rest_method('GET')
+def welcome(request):
+    ret = dict(errCode=0, errMsg=request.GET)
+    Md_Debug.info('Welcome!')
+    return JsonResponse(ret)
+```
+```
+tailf /opt/nsfocus/espc/log/majordomo/majordomo.log
+```
+```
+(INFO) [2019-04-24 15:24:28,974] {app/huangyu_test/views.py:11} welcome - Welcome!
+```
+3. 数据库操作可以使用django.db.connection
+
+```Python
+#! /usr/bin/env python
+# -*- coding:utf-8 -*-
+import traceback
+
+from django.db import connection
+from django.http import JsonResponse
+
+from majordomo.decorators import permit_rest_method
+from utils.logger import Md_Debug
+
+
+# Create your views here.
+@permit_rest_method('GET')
+def welcome(request):
+    Md_Debug.info('Welcome!')
+    ret = dict(errCode=0, errMsg='')
+    account_id = request.GET.get('accountId')
+    select_sql = 'SELECT * FROM auth_user WHERE id >= %s'
+    select_params = (int(account_id),)
+    try:
+        cursor = connection.cursor()
+        cursor.execute(select_sql, select_params)
+        row_data = cursor.fetchall()
+        col_names = [desc[0] for desc in cursor.description]
+        
+        ret['errMsg'] = list()
+        for row in row_data:
+            obj_dict = dict()
+            for index, value in enumerate(row):
+                obj_dict[col_names[index]] = value
+                
+            ret['errMsg'].append(obj_dict)
+    except:
+        Md_Debug.error(traceback.format_exc())
+    return JsonResponse(ret)
+```
+
+```
+{
+    "errCode": 0,
+    "errMsg": [
+        {
+            "name": "admin",
+            "pwd_uptime": "2019-04-04T11:16:30.807",
+            "id": 1,
+            "phone": "",
+            "pwd": "a85d1c492ccd48b1e250433b9241f0a8",
+            "ip_range": "",
+            "full_name": "管理员",
+            "active": true,
+            "group_id": 1,
+            "email": "",
+            "scan_range": ""
+        },
+        {
+            "name": "yunshan",
+            "pwd_uptime": "2019-04-18T09:17:14.269",
+            "id": 12,
+            "phone": "",
+            "pwd": "a85d1c492ccd48b1e250433b9241f0a8",
+            "ip_range": "",
+            "full_name": "yunshan",
+            "active": true,
+            "group_id": 1,
+            "email": "",
+            "scan_range": ""
+        },
+        {
+            "name": "liuyang",
+            "pwd_uptime": "2019-04-16T17:06:49.259",
+            "id": 11,
+            "phone": "19923232323",
+            "pwd": "a85d1c492ccd48b1e250433b9241f0a8",
+            "ip_range": "",
+            "full_name": "liuyang",
+            "active": true,
+            "group_id": 1,
+            "email": "",
+            "scan_range": ""
+        }
+    ]
+}
+```
